@@ -1,0 +1,545 @@
+论坛项目总结
+
+一、实现方式与流程分析
+
+   Servlet:
+
+	第一种: 1、展示所有帖子列表（树状的方式）   --article.jsp
+		2、详细展示帖子			--articleDetail.jsp
+		3、回复帖子			--reply.jsp
+		4、删除帖子			--delete.jsp
+		5、发表新主贴			--post.jsp
+		6、更新帖子内容			--modify.jsp
+
+
+	第二种: 1、只展示所有主题贴（分页的方式）	--articleFlat.jsp
+		2、详细展示主题贴下的所有字帖	--articleDetailFlat.jsp
+		3、回复帖子			--replyFlat.jsp
+		4、删除帖子			--deleteFlat.jsp
+		5、发表新主题			--postFlat.jsp
+		6、更新主帖内容			--modifyFlat.jsp
+
+   ★springmvc:
+
+	第三种:由第二种改变而来
+		1、只展示所有主题贴（分页的方式）	--article.do
+		2、详细展示主题贴下的所有字帖	--articleDetail.do
+		3、回复帖子			--reply.do
+		4、删除帖子			--delete.do
+		5、发表新主题			--post.do
+		6、更新主帖内容			--modify.do
+
+
+
+二、具体实现和细节分析
+	帖子主要具有的属性有:
+			id    :帖子本身的标志
+			pid   :父帖的id,如果是主帖子则pid=0
+			rootid:一个主帖和它的所有子帖都有一个共同的rootid，说明他们属于一棵树
+			title :帖子主题
+			cont  :帖子内容
+			pdate :发帖或回帖时间
+			isleaf:判断是否是叶子帖
+
+
+▇▇▇▇▇◆第一种:
+	      ●1、①展示帖子的"树状结构"是一个比较相对复杂的结构，需要用到递归方法。
+		 ②isleaf是用来判断递归是否继续的条件。
+	       	 ③这个递归的关键是判断isleaf
+		 ④如果isleaf不为0，则通过递归传帖子id把子帖找出来。
+	         ⑤如果isleaf为0,说明这个帖子是一个叶子结点的帖子，结束当前递归。
+
+	★展示帖子主要代码：
+<%!
+public void tree(List<Article> article, Connection con, int id, int grade) {
+
+	String sql = "select *from article where pid='"+id+"'";
+	PreparedStatement stmt = null;
+	ResultSet rs = null;
+	try {
+		stmt = con.prepareStatement(sql);
+		rs = stmt.executeQuery();
+		while (rs.next()) {
+			Article ar = new Article();
+			ar.initFromResultSet(rs);
+			ar.setGrade(grade);
+			article.add(ar);
+			if (!ar.getIsleaf()) {
+				★tree(article, con, rs.getInt("id"), grade + 1);
+			}
+		}
+	} catch (SQLException e) {
+		e.printStackTrace();
+	} finally {
+		try {
+			stmt.close();
+			rs.close();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+}
+%>
+
+<%
+List<Article> article = new ArrayList<Article>();
+Connection con = Mysql.getConnection();
+tree(article, con, 0, 0);
+con.close();
+%>
+
+
+	      ●2、详细展示帖子只需要把帖子的id通过链接标签传递过去，然后进行数据库访问。
+
+		
+	      ●3、①回复帖子需要将帖子id、rootid通过链接标签传递过去
+		  ②此时帖子的id就是回复之后的帖子的pid,rootid说明它们都是一棵树
+		  ③其中有一个ckeditor编辑器的内容需要了解，这个暂时不多说。
+		  ④最后把表单的内容写入数据库即可。
+		  
+
+	      ●4、①删除帖子这个环节需要考虑比较多。
+		  ②删除帖子需要得到这个帖子的id、pid，isleaf
+		  ③首先需要判断isleaf，如果是叶子帖子，直接通过数据库删除帖子，然后通过pid判断它的父帖还有没有子节点，如果没有，此时需要将父帖改为叶子帖（isleaf=0）
+		  ④如果isleaf不是叶子帖，则需要通过递归来找到它的所有的子帖，将它们删除掉，然后通过pid判断它的父帖还有没有子节点，如果没有，此时需要将父帖改为叶子帖（isleaf=0）
+
+
+	★删除帖子主要代码：
+<%!
+public void delete(Connection con, int id, boolean isLeaf) {
+
+	if (!isLeaf) {
+		String sql = "select *from article where pid='"+id+"'";
+		PreparedStatement stmt = null;
+		ResultSet rs = null;
+		try {
+			stmt = con.prepareStatement(sql);
+			rs = stmt.executeQuery();
+			while (rs.next()) {
+				★delete(con, rs.getInt("id"), rs.getInt("isLeaf") == 0);
+			}
+		} catch (SQLException e) {
+			e.printStackTrace();
+		} finally {
+			try {
+				stmt.close();
+				rs.close();
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
+	}
+	
+	★String sql2 = "delete from article where id="+id;
+	PreparedStatement stmt = null;
+	ResultSet rs = null;
+	try {
+		stmt = con.prepareStatement(sql2);
+		stmt.executeUpdate();
+	} catch (Exception e) {
+		e.printStackTrace();
+	}
+	
+}
+%>
+
+<%
+int id = 0;
+boolean isLeaf = false;
+if (request.getParameter("id") == null && request.getParameter("isLeaf") == null && request.getParameter("pid") == null) {
+	response.sendRedirect("article.jsp");
+} else {
+	id = Integer.parseInt(request.getParameter("id"));
+	isLeaf = Boolean.parseBoolean(request.getParameter("isLeaf"));
+	List<Article> article = new ArrayList<Article>();
+	Connection con = Mysql.getConnection();
+	delete(con, id,isLeaf);
+	int pid = Integer.parseInt(request.getParameter("pid"));
+	
+	PreparedStatement stmt = null;
+	ResultSet rs = null;
+	★stmt = con.prepareStatement("select count(*) from article where pid="+pid);
+	
+	rs = stmt.executeQuery();
+	rs.next();
+	int count = rs.getInt(1);
+	if (count <= 0) {
+		★stmt = con.prepareStatement("update article set isleaf=0 where id="+pid);
+		stmt.executeUpdate();
+	}
+	con.close();
+	stmt.close();
+}
+%>
+
+	      ●5、发表新主题只需要从数据库比较rootid,找到最大的rootid,然后新的帖子就是rootid+1。
+
+
+	      ●6、①更新帖子传一个id。
+		  ②通过id从数据库得到这个id的title、cont然后展示出来。
+		  ③通过表单重新获得这个id、title、cont，最后写入数据库。
+
+
+
+▇▇▇▇	◆第二种:
+		分页属性 ：	currentPage :当前页
+				pageSize    :每页显示记录数
+				totalRecord :总记录数
+				totalPage   :总页数
+	      ●1、①展示帖子用到分页模式、列表。
+		 ②通过pid=0找到所有主帖。
+	       	 ③找到所有主帖时，并记录总记录数。
+		 ④通过总记录数（totalRecord)、每页显示记录数(pageSize)计算总页数。
+	         ⑤还有个小细节，currentPage <= 0 时，currentPage = 1；
+		 ⑥currentPage > totalPage 时，currentPage = totalPage；
+
+	★展示帖子主要代码：
+<%
+PageBean pageBean = new PageBean();
+pageBean.setPageSize(2);
+int currentPage = request.getParameter("currentPage") == null ? 1 : Integer.parseInt(request.getParameter("currentPage"));
+★if (currentPage <= 0) {
+	currentPage = 1;
+}
+List<Article> article = new ArrayList<Article>();
+String sql = "select count(*) from article where pid=0";
+Connection con = Mysql.getConnection();
+PreparedStatement pstmt = null;
+ResultSet rs = null;
+pstmt = con.prepareStatement(sql);
+rs = pstmt.executeQuery();
+if(rs.next()) {
+	pageBean.setTotalRecord(rs.getInt(1));
+	pageBean.setTotalPage(pageBean.getTotalRecord(), pageBean.getPageSize());
+}
+★if (currentPage > pageBean.getTotalPage()) {
+	currentPage = pageBean.getTotalPage();
+}
+
+★String sql2 = "select *from article where pid=0 order by pdate desc limit "+(currentPage-1)*pageBean.getPageSize()+","+pageBean.getPageSize();
+pstmt = con.prepareStatement(sql2);
+rs = pstmt.executeQuery();
+while (rs.next()) {
+	Article ar = new Article();
+	ar.initFromResultSet(rs);
+	article.add(ar);
+}
+%>
+
+
+
+	      ●2、①展示所有主帖和子贴把帖子的id、rootid通过链接标签传递过去，然后进行数据库访问。
+		   ②返回一个对象集合
+
+		
+	      ●3、①回复帖子需要将帖子id、rootid通过链接标签传递过去。
+		  ②此时帖子的id就是回复之后的帖子的pid,rootid说明它们都是一棵树。
+		  ③其中有一个ckeditor编辑器的内容需要了解，这个暂时不多说。
+		  ④最后把表单的内容写入数据库即可。
+		  
+
+	      ●4、①删除帖子这个环节需要考虑比较多。
+		  ②删除帖子需要得到这个帖子的id、pid，isleaf
+		  ③首先需要判断isleaf，如果是叶子帖子，直接通过数据库删除帖子，然后通过pid判断它的父帖还有没有子节点，如果没有，此时需要将父帖改为叶子帖（isleaf=0）
+		  ④如果isleaf不是叶子帖，则需要通过递归来找到它的所有的子帖，将它们删除掉，然后通过pid判断它的父帖还有没有子节点，如果没有，此时需要将父帖改为叶子帖（isleaf=0）
+
+	      ●5、发表新主题只需要从数据库比较rootid,找到最大的rootid,然后新的帖子就是rootid+1.
+
+
+	      ●6、①更新帖子传一个id
+		  ②通过id从数据库得到这个id的title、cont然后展示出来
+		  ③通过表单重新获得这个id、title、cont，最后写入数据库
+
+
+
+
+▇▇▇▇	◆第三种:
+		分页属性 ：	currentPage :当前页
+				pageSize    :每页显示记录数
+				totalRecord :总记录数
+				totalPage   :总页数
+
+		学会了对数据库的封装（相对比较好）
+
+    ★封装代码:
+package com.bbs.dao;
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+
+public class DBF {
+	
+	//获得一个连接
+	public static Connection getConnection() {
+		Connection con = null;
+		try {
+			Class.forName("com.mysql.jdbc.Driver");
+			con = (Connection)DriverManager.getConnection("jdbc:mysql://localhost:3306/bbs","root","1104428690A");
+		} catch (SQLException e) {
+			e.printStackTrace();
+		} catch (ClassNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		return con;
+	}
+	
+	//1、没有sql语句，得到一个statement的连接
+	public static Statement getStmt(Connection con) {
+		Statement stmt = null;
+		try {
+			stmt = con.createStatement();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		return stmt;
+	}
+	
+	//2、有sql语句，得到一个statement的连接
+		public static PreparedStatement getStmt(Connection con, String sql) {
+			PreparedStatement stmt = null;
+			try {
+				stmt = con.prepareStatement(sql);
+			} catch (SQLException e) {
+				e.printStackTrace();
+			}
+			return stmt;
+		}
+		
+	//1，没有sql语句，得到结果集
+	public static ResultSet executeQuery(PreparedStatement stmt) {
+		ResultSet rs = null;
+		try {
+			rs = stmt.executeQuery();
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		return rs;
+	}
+	
+	//2、有sql语句，得到结果集
+	public static ResultSet executeQuery(Statement stmt, String sql) {
+		ResultSet rs = null;
+		try {
+			rs = stmt.executeQuery(sql);
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+		return rs;
+	}
+	
+	//1、有sql语句的删除，插入，更新
+	public static void executeUpdate(Statement stmt, String sql) {
+		try {
+			stmt.executeUpdate(sql);
+		} catch (SQLException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	//1、没有sql语句删除，插入，更新
+		public static void executeUpdate(PreparedStatement pstmt) {
+			try {
+				pstmt.executeUpdate();
+			} catch (SQLException e) {
+				e.printStackTrace();
+			}
+		}
+		
+		
+	//关闭各个连接
+		public static void close(Connection con) {
+			if (con != null) {
+				try {
+					con.close();
+				} catch (SQLException e) {
+					e.printStackTrace();
+				}
+			}
+			con = null;
+		}
+		
+		public static void close(PreparedStatement pstmt) {
+			if (pstmt != null) {
+				try {
+					pstmt.close();
+				} catch (SQLException e) {
+					e.printStackTrace();
+				}
+			}
+			pstmt = null;
+		}
+		
+		public static void close(Statement stmt) {
+			if (stmt != null) {
+				try {
+					stmt.close();
+				} catch (SQLException e) {
+					e.printStackTrace();
+				}
+			}
+			stmt = null;
+		}
+		
+		public static void close(ResultSet rs) {
+			if (rs != null) {
+				try {
+					rs.close();
+				} catch (SQLException e) {
+					e.printStackTrace();
+				}
+			}
+			rs = null;
+		}
+
+}
+
+	      ●1、①展示帖子用到分页模式、列表。
+		 ②通过pid=0找到所有主帖。
+	       	 ③找到所有主帖时，并记录总记录数。
+		 ④通过总记录数（totalRecord)、每页显示记录数(pageSize)计算总页数。
+	         ⑤还有个小细节，currentPage <= 0 时，currentPage = 1；
+		 ⑥currentPage > totalPage 时，currentPage = totalPage；
+
+	★展示帖子主要代码：
+
+
+	//分页展现整个主贴
+	@SuppressWarnings("resource")
+	@Override
+	public PageBean<Article> list(PageBean<Article> pageBean) {
+		con = DBF.getConnection();
+		List<Article> list = new ArrayList<Article>();
+		PreparedStatement pstmt = null;
+		Statement stmt = null;
+		ResultSet rs = null;
+		pstmt = DBF.getStmt(con,"select *from article where pid=0 limit ?,?");
+		try {
+			stmt = DBF.getStmt(con);
+			rs = DBF.executeQuery(stmt, "select count(*) from article where pid=0");
+			
+			//得到总记录数，并求得总页数保存
+			if (rs.next()) {
+				pageBean.setTotalRecord(rs.getInt(1));
+				pageBean.setTotalPage(pageBean.getTotalRecord(), pageBean.getPageSize());
+			}
+			
+			//如果页面大于总记页数，则需要让当前页面等于总页数
+			if (pageBean.getCurrentPage() > pageBean.getTotalPage()) {
+				pageBean.setCurrentPage(pageBean.getTotalPage());
+			}
+			
+			pstmt.setInt(1, (pageBean.getCurrentPage()-1)*pageBean.getPageSize());
+			pstmt.setInt(2, pageBean.getPageSize());
+			rs = DBF.executeQuery(pstmt);
+			while (rs.next()) {
+				Article ar = new Article();
+				ar.initArtile(rs);
+				list.add(ar);
+			}
+			
+		} catch (SQLException e) {
+			e.printStackTrace();
+		} finally {
+			DBF.close(con);
+			DBF.close(rs);
+			DBF.close(pstmt);
+			DBF.close(stmt);
+		}
+		pageBean.setResult(list);
+		return pageBean;
+	}
+
+
+	      ●2、①展示所有主帖和子贴把帖子的id、rootid通过链接标签传递过去，然后进行数据库访问。
+		   ②返回一个对象集合
+
+		
+	      ●3、①回复帖子需要将帖子id、rootid通过链接标签传递过去。
+		  ②此时帖子的id就是回复之后的帖子的pid,rootid说明它们都是一棵树。
+		  ③其中有一个ckeditor编辑器的内容需要了解，这个暂时不多说。
+		  ④最后把表单的内容写入数据库即可。
+		  
+
+	      ●4、①删除帖子这个环节需要考虑比较多。
+		  ②删除帖子需要得到这个帖子的id、pid，isleaf
+		  ③首先需要判断isleaf，如果是叶子帖子，直接通过数据库删除帖子，然后通过pid判断它的父帖还有没有子节点，如果没有，此时需要将父帖改为叶子帖（isleaf=0）
+		  ④如果isleaf不是叶子帖，则需要通过递归来找到它的所有的子帖，将它们删除掉，然后通过pid判断它的父帖还有没有子节点，如果没有，此时需要将父帖改为叶子帖（isleaf=0）
+
+  删除帖子主要代码：
+//删除帖子
+	@Override
+	public void delete(Article article) {
+		
+		
+		int id = article.getId();
+		int pid = article.getPid();
+		boolean isLeaf = article.getIsLeaf();
+		System.out.println("次数"+id+" "+pid+" "+isLeaf);
+		if (!isLeaf) {
+			List<Article> list = db.delete(id, pid);
+			for (Article ar : list) {
+				article = ar;
+				★delete(article);
+			}
+		} else {
+			db.delete(id, pid);
+		}
+	}
+
+	      ●5、发表新主题只需要从数据库比较rootid,找到最大的rootid,然后新的帖子就是rootid+1.
+
+
+	      ●6、①更新帖子传一个id
+		  ②通过id从数据库得到这个id的title、cont然后展示出来
+		  ③通过表单重新获得这个id、title、cont，最后写入数据库
+
+
+三、总结
+    我做项目时，都是先看一遍视频，然后自己动手敲，而不是跟着视频一步一步的把代码敲出来，因为我并不喜欢和视频里的代码一样，我喜欢加入自己的思想，当卡住时我会回去看视频，不懂就反复看几遍，再不懂就是找资料，百度或者问一些比较有实力的人。
+    着手这个论坛项目时，通过视频一步一步的实现一些效果，我显得十分吃力，特别是在树状展示帖子这个环节上，卡住了我很久。现在回想，我明确起初我并不清晰什么是帖子pid、rootid、isleaf，觉得它们的关系特别复杂，这个也就是我吃力的根本原因。很多时候就是因为这些不懂想要放弃，但是想着都已经实现了一部分了，放弃也太失败了，最后都坚持下来了。后来通过百度，找了很多资料，还有就是反复看视频，才把这些帖子的各个属性给把握住，这个时候我写代码就变的很流畅，而且遇到了一些bug基本上自己都能很快的解决。所以在做树状展示帖子时，也就是展示帖子和删除帖子这两个环节比较难，而且有些比较难理解，花费了我最多时间。这两个环节吃透了以后，后面的回帖、发帖、更新帖子做起来都相当顺手，做起来bug也非常少。
+    当我完成了树状展示帖子后，也就是第一种方式，我就开始了第二种平板展示，这个做起来基本上和第一种是差不了多少，也就是多了一个分页，还有需要把主帖下的所有字帖展示出来。但是，就是因为一个分页，我又搞了半天，就是从后台传一个集合到前台没找到方法，然后找资料也没有搞明白，后来还好有师傅的指点，原来我把request.getParameter 和 request.getAttribute两个给搞乱了，request.getParameter是接受字符串的，而request.getAttribute是接受对象的，这个我一不细心还把它们看成是一个函数去了。。。所以，以后要细心一点。
+    完成了servlet的之后，下一步也就是改造成springmvc模式，这个模式我也感觉比较喜欢，因为这些耦合度都很低，每个任务也分的很详细，我写起来感觉轻松些。但是还是基于已经把servlet写完了之后，不然拿到这个项目就写成springmvc模式，我也会非常吃力。在这次改造中，我通过一些资料，学会了封装数据库，而且封装的也算是比较好，这个是我感觉值得骄傲的。因为有前面的servlet，我也就花了两天不到就把springmvc改造出来了。
+    现在发现这个项目其实不难，但是也要有耐心。耐心也使得我这次也学到了很多知识。
+    我所做的每一个项目都会让我收获众多。我希望自己在之后的项目中，会做的更好，更出色。
+    总之，人是在学习中不断成长，坚持、耐心是走向成功的捷径。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
