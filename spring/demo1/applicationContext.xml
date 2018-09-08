@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:p="http://www.springframework.org/schema/p"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="
+        http://www.springframework.org/schema/beans 
+        http://www.springframework.org/schema/beans/spring-beans.xsd">
+    <!-- bean definitions here -->
+    <!-- 各个属性的使用 -->
+	<bean id="userDAO" class="com.spring.demo1.UserDAOHibernateImpl">
+	<!-- 	使用依赖注入DI方式实现将类的属性注入 -->
+		<property name="name" value="李四"></property>
+	</bean>
+	
+	
+	<!-- 生命周期 -->
+	<bean id="customerDAO" class="com.spring.demo2.CustomerDAOImpl" init-method="setUp" destroy-method="destroy"></bean>
+	
+	
+	<!-- 属性注入的两种方式 -->
+	<!-- 1、构造方法的属性注入 -->
+	<bean id="car" class="com.spring.demo3.Car">
+		<constructor-arg name="carName" value="宝马"/>
+		<constructor-arg name="carPrice" value="800000"/>
+	</bean>
+	
+	<!-- 2、set方法的属性注入 -->
+	<bean id="car2" class="com.spring.demo3.Car2">
+		<property name="carName" value="奔驰"/>
+		<property name="carPrice" value="810000"/>
+	</bean>
+	
+	<!-- 3、set方法的对象类型注入 -->
+	<bean id="employee" class="com.spring.demo3.Employee">
+		<!-- value用来设置普通类型的值  ref用来设置其它类的id或name -->
+		<property name="name" value="黄智学"/>
+		<property name="car" ref="car2"/>
+	</bean>
+	
+	
+	<!-- 使用名称空间注入属性值 -->
+	<bean id="car3" class="com.spring.demo3.Car2" p:carName="法拉利" p:carPrice="8000000"></bean>
+	<bean id="employee2" class="com.spring.demo3.Employee" p:name="黄智学" p:car-ref="car3"></bean>
+	<import resource="applicationContext3.xml"/>
+	<import resource="applicationContext2.xml"/>
+	
+</beans>
